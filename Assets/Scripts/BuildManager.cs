@@ -1,15 +1,22 @@
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using TMPro;
 
 public class BuildManager : MonoBehaviour
 {
     public GameObject rodA, rodB, rodC;
     public GameObject boxPrefab; // Prefab for disks
     private Stack<Transform>[] rods;
-    private int numBoxes;
+    int numBoxes = 5;
+    public TMP_InputField inputField;
+    public Material[] diskMaterials;
     float baseSize = 2f; // Size of the largest (bottom) disk
     float sizeStep = 0.2f; // How much each disk shrinks
+    private Coroutine simulationCoroutine;
+    private Transform movingDisk;
+    public TextMeshPro stepsText;
+    public ParticleSystem confettiParticleSystem;
 
     void Start()
     {
@@ -17,23 +24,84 @@ public class BuildManager : MonoBehaviour
         rods[0] = new Stack<Transform>();
         rods[1] = new Stack<Transform>();
         rods[2] = new Stack<Transform>();
+        // Set default value
+        inputField.text = numBoxes.ToString();
+        inputField.onEndEdit.AddListener(delegate { StartSimulation(); });
+
+        // Start simulation with default value
         StartSimulation();
     }
 
     public void StartSimulation()
     {
-        // numBoxes = int.Parse(inputField.text);
-        numBoxes = 10;
-        StartCoroutine(GenerateDisks(numBoxes));
+        int oldNumBoxes = numBoxes;
+        if (int.TryParse(inputField.text, out numBoxes))
+        {
+            if (numBoxes < 11 && numBoxes > 1)
+            {
+                ResetSimulation();
+                if (simulationCoroutine != null)
+                {
+                    StopCoroutine(simulationCoroutine); // Stop the running simulation
+                }
+                simulationCoroutine = StartCoroutine(GenerateDisks(numBoxes)); // Start a new simulation
+            }
+            else
+            {
+                Debug.LogError("Invalid number of boxes: Number is not between 2 and 10");
+                numBoxes = oldNumBoxes;
+                inputField.text = numBoxes.ToString();
+            }
+        }
+        else
+        {
+            Debug.LogError("Invalid number of boxes");
+        }
     }
+    private void ResetSimulation()
+    {
+        // Stop the running simulation
+        if (simulationCoroutine != null)
+        {
+            StopCoroutine(simulationCoroutine);
+            simulationCoroutine = null;
+        }
 
-    public Material[] diskMaterials;
+        // Destroy the moving disk if any
+        if (movingDisk != null)
+        {
+            Destroy(movingDisk.gameObject);
+            movingDisk = null;
+        }
+
+        // Clear the rods and destroy the disks
+        for (int i = 0; i < rods.Length; i++)
+        {
+            while (rods[i].Count > 0)
+            {
+                Transform disk = rods[i].Pop();
+                Destroy(disk.gameObject);
+            }
+        }
+
+        // Clear the steps text
+        if (stepsText != null)
+        {
+            stepsText.text = "";
+        }
+    }
     IEnumerator GenerateDisks(int n)
     {
         for (int i = 0; i < n; i++)
         {
-            Debug.Log("Creating disk " + i);
+            string stepMessage = $"Création de la boîte {i + 1}";
+            Debug.Log(stepMessage);
+            if (stepsText != null)
+            {
+                stepsText.text = stepMessage;
+            }
             GameObject disk = Instantiate(boxPrefab);
+            sizeStep = baseSize / numBoxes;
             float scaleFactor = baseSize - (i * sizeStep);
             disk.transform.localScale = new Vector3(scaleFactor, 0.3f, scaleFactor);
             float height = i + 2f;
@@ -48,8 +116,18 @@ public class BuildManager : MonoBehaviour
             rods[0].Push(disk.transform);
             yield return new WaitForSeconds(1f);
         }
-        yield return new WaitForSeconds(1f);
-        StartCoroutine(SolveHanoi(numBoxes, 0, 2, 1));
+        yield return new WaitForSeconds(0.5f);
+        yield return StartCoroutine(SolveHanoi(numBoxes, 0, 2, 1));
+
+        // Display completion message
+        if (stepsText != null)
+        {
+            stepsText.text = "Algorithme terminé!";
+        }
+        if (confettiParticleSystem != null)
+        {
+            confettiParticleSystem.Play();
+        }
     }
 
     IEnumerator SolveHanoi(int n, int source, int destination, int auxiliary)
@@ -72,13 +150,19 @@ public class BuildManager : MonoBehaviour
         if (rods[from].Count == 0) yield break;
 
         Transform disk = rods[from].Pop();
+        movingDisk = disk;
         Rigidbody rb = disk.GetComponent<Rigidbody>();
 
-        Debug.Log($"Moving disk from rod {from} to rod {to}");
+        string stepMessage = $"Déplacement de la boîte de la position {from + 1} à la position {to + 1}";
+        Debug.Log(stepMessage);
+        if (stepsText != null)
+        {
+            stepsText.text = stepMessage;
+        }
 
         float liftHeight = numBoxes * disk.transform.localScale.y + 0.3f; // How high the disk lifts
-        float moveDuration = 1f; // Faster movement
-        float dropSpeed = 0.5f; // Controlled drop speed
+        float moveDuration = 0.5f; // Faster movement
+        float dropSpeed = 0.3f; // Controlled drop speed
 
         Vector3 startPos = disk.position;
         Vector3 liftPos = new Vector3(startPos.x, liftHeight, startPos.z);
